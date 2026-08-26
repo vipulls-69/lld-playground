@@ -1,7 +1,6 @@
 /** @type {import('next').NextConfig} */
 const isProd = process.env.NODE_ENV === 'production';
-const repoName = 'your-repo-name'; // Replace with your repository name
-
+const repoName = 'lld-playground'; 
 const nextConfig = {
   // Required for GitHub Pages
   output: 'export',
