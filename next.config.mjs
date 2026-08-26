@@ -1,14 +1,22 @@
 /** @type {import('next').NextConfig} */
+const isProd = process.env.NODE_ENV === 'production';
+const repoName = 'your-repo-name'; // Replace with your repository name
+
 const nextConfig = {
+  // Required for GitHub Pages
+  output: 'export',
+  basePath: isProd ? `/${repoName}` : '',
+  images: {
+    unoptimized: true,
+  },
+
+  // Your existing settings
   reactStrictMode: true,
-  // Monaco editor loads workers from CDN; keep builds deterministic
-  transpilePackages: ["@monaco-editor/react"],
+  transpilePackages: ['@monaco-editor/react'],
   eslint: {
-    // Don't fail production builds on lint warnings
     ignoreDuringBuilds: true,
   },
   typescript: {
-    // Type errors are checked in CI; don't block the build
     ignoreBuildErrors: false,
   },
 };
