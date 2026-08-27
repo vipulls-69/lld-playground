@@ -137,6 +137,58 @@ function CanvasInner() {
       }
       if (inInput) return;
 
+      // Shortcuts: Shift+<key> to insert UML blocks at cursor (or center if not over canvas)
+      const addAtCursor = (kind: UMLNodeData["kind"], name?: string) => {
+        e.preventDefault();
+        const el = wrapper.current;
+        let pos = cursorFlow.current;
+        const overCanvas = el && el.matches(":hover");
+        if (!overCanvas && el) {
+          const rect = el.getBoundingClientRect();
+          pos = screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+        }
+        // center-offset similar to click-to-place
+        addNode(kind, { x: pos.x - 110, y: pos.y - 60 }, name);
+        useUIStore.getState().setActiveTool("pointer");
+      };
+
+      if (e.shiftKey && !mod) {
+        const k = e.key.toLowerCase();
+        if (k === "c") {
+          addAtCursor("class");
+          return;
+        }
+        if (k === "i") {
+          addAtCursor("interface");
+          return;
+        }
+        if (k === "e") {
+          addAtCursor("enum");
+          return;
+        }
+        if (k === "a") {
+          addAtCursor("abstract");
+          return;
+        }
+        if (k === "r") {
+          addAtCursor("record");
+          return;
+        }
+        if (k === "n") {
+          addAtCursor("note", "note");
+          return;
+        }
+        if (k === "o") {
+          addAtCursor("package");
+          return;
+        }
+        if (k === "t") {
+          // Shift+T reserved for lifeline (T used by text tool without shift)
+          addAtCursor("lifeline");
+          return;
+        }
+      }
+
       if (e.key === "Delete" || e.key === "Backspace") {
         deleteSelection();
       } else if (mod && e.key.toLowerCase() === "z" && !e.shiftKey) {
