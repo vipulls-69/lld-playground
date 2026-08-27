@@ -137,6 +137,18 @@ function CanvasInner() {
       }
       if (inInput) return;
 
+      // If a node is selected and Enter is pressed, open edit mode for that node
+      if (e.key === "Enter" && !mod) {
+        const selected = useCanvasStore.getState().selectedIds;
+        if (selected && selected.length === 1) {
+          e.preventDefault();
+          window.dispatchEvent(
+            new CustomEvent("uml:enter-edit", { detail: { id: selected[0] } })
+          );
+          return;
+        }
+      }
+
       // Shortcuts: Shift+<key> to insert UML blocks at cursor (or center if not over canvas)
       const addAtCursor = (kind: UMLNodeData["kind"], name?: string) => {
         e.preventDefault();
