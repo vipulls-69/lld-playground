@@ -715,8 +715,11 @@ export const UMLNodeRenderer = memo(function UMLNodeRenderer({ data, selected, i
       {/* Fields / enum values */}
       {d.kind !== "interface" && (
         <div
-          className={cn("min-h-0 shrink-0 border-b border-border py-1 scrollbar-thin", editing ? "overflow-visible" : "overflow-y-auto")}
-          style={editing ? undefined : { maxHeight: "45%" }}
+          className={cn(
+            // Make fields a flexible region so it shares vertical space with methods.
+            "min-h-0 flex-1 border-b border-border py-1 scrollbar-thin",
+            editing ? "overflow-visible" : "overflow-y-auto"
+          )}
         >
           {d.kind === "enum" ? (
             <>
@@ -772,7 +775,7 @@ export const UMLNodeRenderer = memo(function UMLNodeRenderer({ data, selected, i
           )}
         </div>
       )}
-
+  
       {/* Methods */}
       <div className={cn("min-h-0 flex-1 py-1 scrollbar-thin", editing ? "overflow-visible" : "overflow-y-auto")}>
         {d.methods.length ? (
@@ -794,9 +797,3 @@ export const UMLNodeRenderer = memo(function UMLNodeRenderer({ data, selected, i
           />
         )}
       </div>
-
-      <Handle type="source" position={Position.Bottom} />
-      <Handle type="source" position={Position.Right} id="right" />
-    </div>
-  );
-});
