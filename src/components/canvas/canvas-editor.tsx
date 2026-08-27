@@ -45,6 +45,10 @@ function CanvasInner() {
   // Always-fresh cursor position in flow coordinates (for hotkey placement)
   const cursorFlow = useRef({ x: 0, y: 0 });
 
+  // Throttle mouse-move updates to the browser refresh rate (≈60fps) using requestAnimationFrame
+  const rafRef = useRef<number | null>(null);
+  const pendingPosRef = useRef<{ x: number; y: number } | null>(null);
+
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
@@ -87,12 +91,27 @@ function CanvasInner() {
 
   const onMouseMove = useCallback(
     (e: React.MouseEvent) => {
-      const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
-      cursorFlow.current = pos;
-      setCursorPosition(pos);
+      // schedule the latest mouse position to be applied on the next animation frame
+      pendingPosRef.current = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      if (rafRef.current === null) {
+        rafRef.current = requestAnimationFrame(() => {
+          const pos = pendingPosRef.current ?? { x: 0, y: 0 };
+          cursorFlow.current = pos;
+          setCursorPosition(pos);
+          rafRef.current = null;
+          pendingPosRef.current = null;
+        });
+      }
     },
     [screenToFlowPosition, setCursorPosition]
   );
+
+  // Cleanup any pending RAF on unmount
+  useEffect(() => {
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
 
   // Text tool: click on empty canvas places a note node
   const onPaneClick = useCallback(
