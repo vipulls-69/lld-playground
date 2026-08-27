@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import type { CodeLanguage } from "@/lib/types";
 
-export type ActivityView = "explorer" | "shapes" | "problems" | "auditor" | "settings";
+export type ActivityView = "explorer" | "shapes" | "problems" | "auditor" | "settings" | "diagrams";
 export type CenterView = "canvas" | "split" | "code";
 export type CanvasTool = "pointer" | "pan" | "lasso" | "text";
 
