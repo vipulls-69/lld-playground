@@ -797,3 +797,7 @@ export const UMLNodeRenderer = memo(function UMLNodeRenderer({ data, selected, i
           />
         )}
       </div>
+
+    </div>
+  );
+});
