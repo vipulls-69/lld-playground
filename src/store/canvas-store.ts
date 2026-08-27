@@ -134,6 +134,25 @@ function persist(diagrams: Diagram[], currentDiagramId?: string) {
   }
 }
 
+// Helper to compare snapshots while ignoring node position changes.
+function snapshotsEqualIgnoringPosition(a: { nodes: UMLNode[]; edges: UMLEdge[] } | undefined, b: { nodes: UMLNode[]; edges: UMLEdge[] } | undefined) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const normalize = (s: { nodes: UMLNode[]; edges: UMLEdge[] }) => ({
+    nodes: s.nodes.map((n) => {
+      // shallow copy but omit position
+      const { position, ...rest } = n as any;
+      return rest;
+    }),
+    edges: s.edges,
+  });
+  try {
+    return JSON.stringify(normalize(a)) === JSON.stringify(normalize(b));
+  } catch (e) {
+    return false;
+  }
+}
+
 export const useCanvasStore = create<CanvasState>()(
   temporal(
     (set, get) => {
@@ -336,7 +355,7 @@ export const useCanvasStore = create<CanvasState>()(
     {
       limit: 100,
       partialize: (state) => ({ nodes: state.nodes, edges: state.edges }),
-      equality: (a, b) => JSON.stringify(a) === JSON.stringify(b),
+      equality: (a, b) => snapshotsEqualIgnoringPosition(a as any, b as any),
     }
   )
 );
