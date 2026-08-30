@@ -79,18 +79,44 @@
 .react-flow__node {
   font-family: var(--font-mono);
 }
+
+/* Handle visibility is driven by the NodeHandles component; the generous
+   hit area below makes the small dots easy to grab. */
 .react-flow__handle {
-  width: 6px;
-  height: 6px;
-  @apply bg-muted-foreground border-none opacity-0 transition-opacity;
+  z-index: 5;
 }
-.react-flow__node:hover .react-flow__handle,
-.react-flow__node.selected .react-flow__handle {
-  opacity: 1;
+.react-flow__handle::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
 }
+
+/* Feedback while dragging a connection. */
+.react-flow.connecting .react-flow__handle {
+  opacity: 1 !important;
+}
+.react-flow__handle-connecting {
+  @apply !bg-primary;
+  transform: scale(1.35);
+}
+.react-flow__handle-valid {
+  @apply !bg-emerald-500 !border-emerald-500;
+}
+.react-flow.connecting .react-flow__node {
+  /* Hint that the whole node is a drop target. */
+  @apply ring-1 ring-primary/30;
+}
+.react-flow__connectionline path {
+  @apply stroke-primary;
+}
+
 .react-flow__edge.selected .react-flow__edge-path {
   @apply stroke-foreground;
   stroke-width: 1.5;
+}
+/* Widen the clickable area of edges without changing their appearance. */
+.react-flow__edge-interaction {
+  stroke-width: 16;
 }
 .react-flow__edge-path {
   @apply stroke-muted-foreground;

@@ -4,6 +4,7 @@ import { useUIStore } from "@/store/ui-store";
 import { useCanvasStore } from "@/store/canvas-store";
 import { ShapeLibrary } from "./shape-library";
 import { AuditorPanel } from "./auditor-panel";
+import { DiagramsPanel } from "./diagrams-panel";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Moon, Sun } from "lucide-react";
@@ -12,11 +13,13 @@ const TITLES: Record<string, string> = {
   explorer: "Explorer",
   shapes: "UML Shapes",
   auditor: "Design Auditor",
+  diagrams: "Saved Designs",
   settings: "Settings",
 };
 
 function Explorer() {
-  const { nodes, edges } = useCanvasStore();
+  const nodes = useCanvasStore((s) => s.nodes);
+  const edges = useCanvasStore((s) => s.edges);
   return (
     <div className="flex-1 overflow-y-auto p-2 scrollbar-thin">
       <div className="mb-1 px-1 text-2xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -48,8 +51,10 @@ function Explorer() {
 }
 
 function SettingsPanel() {
-  const { theme, setTheme } = useUIStore();
-  const { gridSnap, toggleGridSnap } = useCanvasStore();
+  const theme = useUIStore((s) => s.theme);
+  const setTheme = useUIStore((s) => s.setTheme);
+  const gridSnap = useCanvasStore((s) => s.gridSnap);
+  const toggleGridSnap = useCanvasStore((s) => s.toggleGridSnap);
   return (
     <div className="flex-1 overflow-y-auto p-3 text-xs scrollbar-thin">
       <div className="mb-2 text-2xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -80,13 +85,18 @@ function SettingsPanel() {
 }
 
 export function Sidebar() {
-  const { activityView, sidebarOpen } = useUIStore();
+  const activityView = useUIStore((s) => s.activityView);
+  const sidebarOpen = useUIStore((s) => s.sidebarOpen);
+  const sidebarWidth = useUIStore((s) => s.sidebarWidth);
   if (!sidebarOpen) return null;
 
   return (
-    <div className="flex w-60 flex-col border-r border-border bg-card">
-      <div className="flex h-9 items-center border-b border-border px-3">
-        {TITLES[activityView] != 'UML Shapes' && (
+    <div
+      style={{ width: sidebarWidth }}
+      className="flex shrink-0 flex-col overflow-hidden bg-card"
+    >
+      <div className="flex h-9 shrink-0 items-center border-b border-border px-3">
+        {activityView !== "shapes" && (
           <span className="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
             {TITLES[activityView]}
           </span>
@@ -95,6 +105,7 @@ export function Sidebar() {
       {activityView === "shapes" && <ShapeLibrary />}
       {activityView === "auditor" && <AuditorPanel />}
       {activityView === "explorer" && <Explorer />}
+      {activityView === "diagrams" && <DiagramsPanel />}
       {activityView === "settings" && <SettingsPanel />}
     </div>
   );

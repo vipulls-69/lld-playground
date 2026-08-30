@@ -14,9 +14,10 @@ const LANGUAGES: { value: CodeLanguage; label: string }[] = [
 ];
 
 export function StatusBar() {
-  const { cursorPosition, language, setLanguage } = useUIStore();
-  const { gridSnap, toggleGridSnap, nodes, edges } = useCanvasStore();
-  const selectedCount = nodes.filter((n) => n.selected).length + edges.filter((e) => e.selected).length;
+  const language = useUIStore((s) => s.language);
+  const setLanguage = useUIStore((s) => s.setLanguage);
+  const gridSnap = useCanvasStore((s) => s.gridSnap);
+  const toggleGridSnap = useCanvasStore((s) => s.toggleGridSnap);
 
   return (
     <div className="flex h-6 items-center gap-3 border-t border-border bg-card px-2 text-2xs text-muted-foreground">

@@ -3,6 +3,7 @@
 import {
   Boxes,
   FileJson,
+  Save,
   Settings,
   Logs,
 } from "lucide-react";
@@ -13,14 +14,18 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 const ITEMS: { id: ActivityView; icon: React.ElementType; label: string }[] = [
   { id: "explorer", icon: FileJson, label: "Explorer" },
   { id: "shapes", icon: Boxes, label: "UML Shapes" },
+  { id: "diagrams", icon: Save, label: "Saved Designs" },
   { id: "auditor", icon: Logs, label: "Design Auditor" },
 ];
 
 export function ActivityBar() {
-  const { activityView, setActivityView, sidebarOpen, toggleSidebar } = useUIStore();
+  const activityView = useUIStore((s) => s.activityView);
+  const setActivityView = useUIStore((s) => s.setActivityView);
+  const sidebarOpen = useUIStore((s) => s.sidebarOpen);
+  const toggleSidebar = useUIStore((s) => s.toggleSidebar);
 
   return (
-    <div className="flex w-11 flex-col items-center border-r border-border bg-card py-1.5">
+    <div className="flex w-11 shrink-0 flex-col items-center border-r border-border bg-card py-1.5">
       <TooltipProvider delayDuration={200}>
         {ITEMS.map(({ id, icon: Icon, label }) => {
           const active = activityView === id && sidebarOpen;

@@ -31,6 +31,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { cn } from "@/lib/utils/cn";
 import { diagramToMermaid } from "@/lib/mermaid/convert";
 import { generateCode } from "@/lib/codegen/generate";
+import { parseGraph, WORKSPACE_VERSION } from "@/lib/utils/schema";
 import { useTemporal } from "@/components/canvas/canvas-editor";
 
 const TOOLS: { id: CanvasTool; icon: React.ElementType; label: string; key: string }[] = [
@@ -51,22 +52,26 @@ function download(filename: string, content: string, mime = "text/plain") {
 }
 
 export function Toolbar() {
-  const {
-    activeTool,
-    setActiveTool,
-    centerView,
-    setCenterView,
-    language,
-    toggleSidebar,
-    sidebarOpen,
-    toggleMinimap,
-    minimapVisible,
-  } = useUIStore();
-  const { nodes, edges, clear } = useCanvasStore();
+  const activeTool = useUIStore((s) => s.activeTool);
+  const setActiveTool = useUIStore((s) => s.setActiveTool);
+  const centerView = useUIStore((s) => s.centerView);
+  const setCenterView = useUIStore((s) => s.setCenterView);
+  const language = useUIStore((s) => s.language);
+  const toggleSidebar = useUIStore((s) => s.toggleSidebar);
+  const sidebarOpen = useUIStore((s) => s.sidebarOpen);
+  const toggleMinimap = useUIStore((s) => s.toggleMinimap);
+  const minimapVisible = useUIStore((s) => s.minimapVisible);
+  const nodes = useCanvasStore((s) => s.nodes);
+  const edges = useCanvasStore((s) => s.edges);
+  const clear = useCanvasStore((s) => s.clear);
   const { undo, redo, pastStates, futureStates } = useTemporal();
 
   const exportJson = () => {
-    download("workspace.lld.json", JSON.stringify({ nodes, edges }, null, 2), "application/json");
+    download(
+      "workspace.lld.json",
+      JSON.stringify({ version: WORKSPACE_VERSION, nodes, edges }, null, 2),
+      "application/json"
+    );
   };
   const exportMermaid = () => {
     download("diagram.mmd", diagramToMermaid(nodes, edges));
@@ -74,6 +79,11 @@ export function Toolbar() {
   const exportCode = () => {
     const ext = { typescript: "ts", java: "java", cpp: "cpp", python: "py", go: "go" }[language];
     download(`generated.${ext}`, generateCode(nodes, edges, language));
+  };
+
+  // The canvas owns image export: it must fit the diagram into view first.
+  const exportImage = (format: "png" | "svg") => {
+    window.dispatchEvent(new CustomEvent("uml:export-image", { detail: { format } }));
   };
   const importJson = () => {
     const input = document.createElement("input");
@@ -83,12 +93,14 @@ export function Toolbar() {
       const file = input.files?.[0];
       if (!file) return;
       try {
-        const parsed = JSON.parse(await file.text());
-        if (Array.isArray(parsed.nodes) && Array.isArray(parsed.edges)) {
-          useCanvasStore.getState().setDiagram(parsed.nodes, parsed.edges);
+        const { nodes: n, edges: e } = parseGraph(JSON.parse(await file.text()));
+        if (!n.length) {
+          window.alert("That file doesn't contain a readable diagram.");
+          return;
         }
+        useCanvasStore.getState().setDiagram(n, e);
       } catch {
-        // ignore malformed files
+        window.alert("Could not read that file — it isn't valid JSON.");
       }
     };
     input.click();
@@ -206,6 +218,9 @@ export function Toolbar() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => exportImage("png")}>Image (.png)</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => exportImage("svg")}>Image (.svg)</DropdownMenuItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem onClick={exportJson}>Workspace (.json)</DropdownMenuItem>
             <DropdownMenuItem onClick={exportMermaid}>Mermaid (.mmd)</DropdownMenuItem>
             <DropdownMenuItem onClick={exportCode}>Generated code</DropdownMenuItem>

@@ -1,6 +1,7 @@
 "use client";
 
 import Editor from "@monaco-editor/react";
+import { useMemo } from "react";
 import { useCanvasStore } from "@/store/canvas-store";
 import { useUIStore } from "@/store/ui-store";
 import { generateCode } from "@/lib/codegen/generate";
@@ -22,9 +23,13 @@ const EXT: Record<string, string> = {
 };
 
 export function CodeEditor() {
-  const { nodes, edges } = useCanvasStore();
-  const { language, theme, centerView } = useUIStore();
-  const codeText = generateCode(nodes, edges, language);
+  const nodes = useCanvasStore((s) => s.nodes);
+  const edges = useCanvasStore((s) => s.edges);
+  const language = useUIStore((s) => s.language);
+  const theme = useUIStore((s) => s.theme);
+  const centerView = useUIStore((s) => s.centerView);
+  // Regenerating on every keystroke/drag is wasteful; only re-run on real changes.
+  const codeText = useMemo(() => generateCode(nodes, edges, language), [nodes, edges, language]);
 
   return (
     <div className="flex h-full flex-col bg-card">

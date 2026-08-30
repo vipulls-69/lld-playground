@@ -13,6 +13,14 @@ import {
 } from "@xyflow/react";
 import type { UMLEdgeData, UMLNodeData } from "@/lib/types";
 import { uid } from "@/lib/utils/cn";
+import { parseWorkspaceJson, serializeWorkspace, parseGraph } from "@/lib/utils/schema";
+import {
+  alignNodes,
+  autoLayout,
+  distributeNodes,
+  type AlignAxis,
+  type DistributeAxis,
+} from "@/lib/canvas/layout";
 
 export type UMLNode = Node<UMLNodeData>;
 export type UMLEdge = Edge<UMLEdgeData>;
@@ -32,9 +40,15 @@ interface CanvasState {
   selectedIds: string[];
   gridSnap: boolean;
 
+  /** False until `hydrate()` has run; guards autosave from clobbering storage. */
+  hydrated: boolean;
+
   // diagram management
   diagrams: Diagram[];
   currentDiagramId?: string;
+
+  /** Loads persisted state from localStorage. Safe to call more than once. */
+  hydrate: () => void;
 
   onNodesChange: (changes: NodeChange<UMLNode>[]) => void;
   onEdgesChange: (changes: EdgeChange<UMLEdge>[]) => void;
@@ -51,6 +65,8 @@ interface CanvasState {
   setNodes: (nodes: UMLNode[]) => void;
   setEdges: (edges: UMLEdge[]) => void;
   setDiagram: (nodes: UMLNode[], edges: UMLEdge[]) => void;
+  /** Makes `id` the sole selected node. */
+  selectOnly: (id: string) => void;
 
   // multi-diagram API
   createDiagram: (name?: string, nodes?: UMLNode[], edges?: UMLEdge[]) => string;
@@ -62,10 +78,26 @@ interface CanvasState {
   toggleGridSnap: () => void;
   duplicateSelection: () => void;
   clear: () => void;
+
+  /** Aligns selected nodes along one edge of their bounding box. */
+  alignSelection: (axis: AlignAxis) => void;
+  /** Evens out the gaps between selected nodes. */
+  distributeSelection: (axis: DistributeAxis) => void;
+  /** Re-flows the whole diagram into inheritance-aware layers. */
+  tidyLayout: () => void;
+  /** Serializes the current selection for the clipboard. */
+  copySelection: () => string | null;
+  /** Inserts nodes/edges from a clipboard payload; returns the new node ids. */
+  pasteClipboard: (payload: string, offset?: { x: number; y: number }) => string[];
 }
 
-const STORAGE_KEY = "lld:diagrams";
-const STORAGE_CURRENT = "lld:currentDiagramId";
+const STORAGE_KEY = "lld-playground:workspace";
+
+/** Storage keys written by earlier versions, read once then removed. */
+const LEGACY_KEYS = ["lld:diagrams", "lld-playground:workspace:v0"];
+
+/** Marker on clipboard payloads so we ignore unrelated JSON. */
+const CLIPBOARD_TYPE = "lld-playground/clipboard";
 
 const defaultData = (kind: UMLNodeData["kind"], name?: string): UMLNodeData => {
   const base: UMLNodeData = { kind, name: name ?? defaultName(kind), fields: [], methods: [] };
@@ -111,79 +143,135 @@ function defaultName(kind: UMLNodeData["kind"]): string {
   }
 }
 
-function loadPersisted(): { diagrams: Diagram[]; currentDiagramId?: string } {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const cur = localStorage.getItem(STORAGE_CURRENT) ?? undefined;
-    if (!raw) return { diagrams: [], currentDiagramId: cur };
-    const parsed = JSON.parse(raw) as Diagram[];
-    return { diagrams: parsed, currentDiagramId: cur };
-  } catch (e) {
-    console.warn("failed to load diagrams from localStorage", e);
-    return { diagrams: [] };
+function loadPersisted(): { diagrams: Diagram[]; currentDiagramId?: string } | null {
+  if (typeof window === "undefined") return null;
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (raw) return parseWorkspaceJson(raw);
+
+  for (const key of LEGACY_KEYS) {
+    const legacy = localStorage.getItem(key);
+    if (!legacy) continue;
+    const parsed = parseWorkspaceJson(legacy);
+    localStorage.removeItem(key);
+    if (parsed) return parsed;
   }
+  return null;
 }
 
 function persist(diagrams: Diagram[], currentDiagramId?: string) {
+  if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(diagrams));
-    if (currentDiagramId) localStorage.setItem(STORAGE_CURRENT, currentDiagramId);
-    else localStorage.removeItem(STORAGE_CURRENT);
+    localStorage.setItem(STORAGE_KEY, serializeWorkspace(diagrams, currentDiagramId));
   } catch (e) {
     console.warn("failed to persist diagrams", e);
   }
 }
 
-// Helper to compare snapshots while ignoring node position changes.
-function snapshotsEqualIgnoringPosition(a: { nodes: UMLNode[]; edges: UMLEdge[] } | undefined, b: { nodes: UMLNode[]; edges: UMLEdge[] } | undefined) {
+function blankDiagram(name = "Default"): Diagram {
+  const now = new Date().toISOString();
+  return { id: uid("D"), name, nodes: [], edges: [], createdAt: now, updatedAt: now };
+}
+
+/**
+ * Fields that change as a by-product of interacting with a node (selecting it,
+ * dragging it, React Flow measuring it) rather than as a real edit. History
+ * entries are compared with these stripped out so they never create an undo step.
+ */
+const TRANSIENT_NODE_KEYS = [
+  "position",
+  "positionAbsolute",
+  "selected",
+  "dragging",
+  "resizing",
+  "measured",
+  "width",
+  "height",
+] as const;
+
+function stripTransient(node: UMLNode) {
+  const rest: Record<string, unknown> = { ...node };
+  for (const key of TRANSIENT_NODE_KEYS) delete rest[key];
+  return rest;
+}
+
+/** True when two snapshots differ only by selection/position/measurement noise. */
+function snapshotsEqual(
+  a: { nodes: UMLNode[]; edges: UMLEdge[] } | undefined,
+  b: { nodes: UMLNode[]; edges: UMLEdge[] } | undefined
+) {
   if (a === b) return true;
   if (!a || !b) return false;
+  if (a.nodes.length !== b.nodes.length || a.edges.length !== b.edges.length) return false;
   const normalize = (s: { nodes: UMLNode[]; edges: UMLEdge[] }) => ({
-    nodes: s.nodes.map((n) => {
-      // shallow copy but omit position
-      const { position, ...rest } = n as any;
-      return rest;
-    }),
-    edges: s.edges,
+    nodes: s.nodes.map(stripTransient),
+    edges: s.edges.map(({ selected, ...rest }) => rest),
   });
   try {
     return JSON.stringify(normalize(a)) === JSON.stringify(normalize(b));
-  } catch (e) {
+  } catch {
     return false;
   }
+}
+
+/**
+ * Leading-edge throttle. Used so a burst of edits (typing a class name one
+ * character at a time) collapses into a single undo step: the first call in the
+ * burst records the pre-edit state and the rest are dropped.
+ */
+function throttleLeading<T extends (...args: never[]) => void>(fn: T, ms: number): T {
+  let last = 0;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return ((...args: Parameters<T>) => {
+    const now = Date.now();
+    if (now - last >= ms) {
+      last = now;
+      fn(...args);
+    } else if (!timer) {
+      // Re-open the window once the burst goes quiet.
+      timer = setTimeout(() => {
+        timer = null;
+        last = 0;
+      }, ms);
+    }
+  }) as T;
 }
 
 export const useCanvasStore = create<CanvasState>()(
   temporal(
     (set, get) => {
-      // initialize from storage
-      const persisted = typeof window !== "undefined" ? loadPersisted() : { diagrams: [] };
-
-      // if there is a persisted current diagram, use it; otherwise create a default one
-      let initialDiagrams = persisted.diagrams ?? [];
-      if (!initialDiagrams.length) {
-        const id = uid("D");
-        initialDiagrams = [
-          {
-            id,
-            name: "Default",
-            nodes: [],
-            edges: [],
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-        ];
-      }
-      const initialCurrent = persisted.currentDiagramId ?? initialDiagrams[0].id;
+      // NOTE: no localStorage access here — the store is created during SSR/prerender.
+      // Real state arrives via `hydrate()`, called from a client effect.
+      const initialDiagram = blankDiagram();
 
       return {
-        nodes: initialDiagrams.find((d) => d.id === initialCurrent)?.nodes ?? [],
-        edges: initialDiagrams.find((d) => d.id === initialCurrent)?.edges ?? [],
+        nodes: [],
+        edges: [],
         selectedIds: [],
         gridSnap: true,
+        hydrated: false,
 
-        diagrams: initialDiagrams,
-        currentDiagramId: initialCurrent,
+        diagrams: [initialDiagram],
+        currentDiagramId: initialDiagram.id,
+
+        hydrate: () => {
+          if (get().hydrated) return;
+          const persisted = loadPersisted();
+          if (!persisted) {
+            set({ hydrated: true });
+            return;
+          }
+          const current =
+            persisted.diagrams.find((d) => d.id === persisted.currentDiagramId) ??
+            persisted.diagrams[0];
+          set({
+            diagrams: persisted.diagrams,
+            currentDiagramId: current.id,
+            nodes: current.nodes,
+            edges: current.edges,
+            selectedIds: [],
+            hydrated: true,
+          });
+        },
 
         onNodesChange: (changes) => {
           set({ nodes: applyNodeChanges(changes, get().nodes) });
@@ -201,24 +289,32 @@ export const useCanvasStore = create<CanvasState>()(
         onEdgesChange: (changes) => set({ edges: applyEdgeChanges(changes, get().edges) }),
 
         onConnect: (connection) => {
+          const { source, target } = connection;
+          // Guard here too: onConnect is also called programmatically.
+          if (!source || !target || source === target) return;
+          const existing = get().edges;
+          if (existing.some((e) => e.source === source && e.target === target)) return;
           const edge: UMLEdge = {
             id: uid("e"),
-            source: connection.source,
-            target: connection.target,
+            source,
+            target,
             sourceHandle: connection.sourceHandle,
             targetHandle: connection.targetHandle,
             type: "uml",
             data: { relation: "association" },
           };
-          set({ edges: [...get().edges, edge] });
+          set({ edges: [...existing, edge] });
         },
 
         addNode: (kind, position, name, stereotype) => {
           const id = uid("n");
           const data = defaultData(kind, name);
-          if (stereotype) {
+          // An empty string is meaningful: it marks a generic box whose
+          // stereotype slot is shown so the user can fill it in.
+          if (stereotype !== undefined) {
             data.stereotype = stereotype;
-            if (!name) data.name = stereotype.charAt(0).toUpperCase() + stereotype.slice(1);
+            if (stereotype && !name)
+              data.name = stereotype.charAt(0).toUpperCase() + stereotype.slice(1);
           }
           const node: UMLNode = {
             id,
@@ -259,6 +355,13 @@ export const useCanvasStore = create<CanvasState>()(
         setNodes: (nodes) => set({ nodes }),
         setEdges: (edges) => set({ edges }),
         setDiagram: (nodes, edges) => set({ nodes, edges, selectedIds: [] }),
+
+        selectOnly: (id) =>
+          set({
+            nodes: get().nodes.map((n) => ({ ...n, selected: n.id === id })),
+            edges: get().edges.map((e) => (e.selected ? { ...e, selected: false } : e)),
+            selectedIds: [id],
+          }),
 
         // multi-diagram API
         createDiagram: (name = "Untitled", nodes = [], edges = []) => {
@@ -350,12 +453,103 @@ export const useCanvasStore = create<CanvasState>()(
         },
 
         clear: () => set({ nodes: [], edges: [], selectedIds: [] }),
+
+        alignSelection: (axis) => {
+          const { nodes } = get();
+          const moves = alignNodes(nodes.filter((n) => n.selected), axis);
+          if (!moves.size) return;
+          set({
+            nodes: nodes.map((n) => (moves.has(n.id) ? { ...n, position: moves.get(n.id)! } : n)),
+          });
+        },
+
+        distributeSelection: (axis) => {
+          const { nodes } = get();
+          const moves = distributeNodes(nodes.filter((n) => n.selected), axis);
+          if (!moves.size) return;
+          set({
+            nodes: nodes.map((n) => (moves.has(n.id) ? { ...n, position: moves.get(n.id)! } : n)),
+          });
+        },
+
+        tidyLayout: () => {
+          const { nodes, edges } = get();
+          // Tidy the selection if there is one, otherwise the whole diagram.
+          const target = nodes.some((n) => n.selected) ? nodes.filter((n) => n.selected) : nodes;
+          const ids = new Set(target.map((n) => n.id));
+          const scoped = edges.filter((e) => ids.has(e.source) && ids.has(e.target));
+          const moves = autoLayout(target, scoped);
+          if (!moves.size) return;
+          set({
+            nodes: nodes.map((n) => (moves.has(n.id) ? { ...n, position: moves.get(n.id)! } : n)),
+          });
+        },
+
+        copySelection: () => {
+          const { nodes, edges } = get();
+          const picked = nodes.filter((n) => n.selected);
+          if (!picked.length) return null;
+          const ids = new Set(picked.map((n) => n.id));
+          return JSON.stringify({
+            type: CLIPBOARD_TYPE,
+            nodes: picked,
+            // Only edges fully inside the selection survive the round trip.
+            edges: edges.filter((e) => ids.has(e.source) && ids.has(e.target)),
+          });
+        },
+
+        pasteClipboard: (payload, offset = { x: 32, y: 32 }) => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(payload);
+          } catch {
+            return [];
+          }
+          if (
+            typeof parsed !== "object" ||
+            parsed === null ||
+            (parsed as { type?: string }).type !== CLIPBOARD_TYPE
+          ) {
+            return [];
+          }
+          // Reuse the import validator so pasted data is sanitized too.
+          const { nodes: srcNodes, edges: srcEdges } = parseGraph(parsed);
+          if (!srcNodes.length) return [];
+
+          const idMap = new Map<string, string>();
+          const newNodes = srcNodes.map((n) => {
+            const nid = uid("n");
+            idMap.set(n.id, nid);
+            return {
+              ...n,
+              id: nid,
+              position: { x: n.position.x + offset.x, y: n.position.y + offset.y },
+              selected: true,
+            };
+          });
+          const newEdges = srcEdges.map((e) => ({
+            ...e,
+            id: uid("e"),
+            source: idMap.get(e.source)!,
+            target: idMap.get(e.target)!,
+            selected: false,
+          }));
+
+          set((state) => ({
+            nodes: state.nodes.map((n) => ({ ...n, selected: false })).concat(newNodes),
+            edges: state.edges.map((e) => ({ ...e, selected: false })).concat(newEdges),
+            selectedIds: newNodes.map((n) => n.id),
+          }));
+          return newNodes.map((n) => n.id);
+        },
       };
     },
     {
       limit: 100,
       partialize: (state) => ({ nodes: state.nodes, edges: state.edges }),
-      equality: (a, b) => snapshotsEqualIgnoringPosition(a as any, b as any),
+      equality: snapshotsEqual,
+      // Collapse rapid successive edits into one undo step.
+      handleSet: (handleSet) => throttleLeading(handleSet, 500),
     }
   )
 );
