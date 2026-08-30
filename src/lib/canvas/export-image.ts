@@ -41,7 +41,8 @@ function inlineStyles(source: Element, target: Element) {
     if (!el?.style) continue;
     const isRoot = i === 0;
     let css = "";
-    for (const prop of computed) {
+    for (let p = 0; p < computed.length; p++) {
+      const prop = computed.item(p);
       if (ALWAYS_SKIPPED.has(prop)) continue;
       if (isRoot && ROOT_SKIPPED.has(prop)) continue;
       css += `${prop}:${computed.getPropertyValue(prop)};`;
